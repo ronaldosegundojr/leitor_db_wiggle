@@ -2,9 +2,11 @@ import sqlite3
 import tkinter as tk
 from tkinter import ttk, filedialog, scrolledtext, messagebox, simpledialog
 import pandas as pd
+import shutil
 
 # Tornar a variável conn global
 conn = None
+arquivo_atual = None  # Adicionar variável para rastrear o arquivo atual
 
 def executar_query_sql(query, treeview):
     global conn  # Adicionar a declaração global para acessar a variável conn
@@ -83,15 +85,16 @@ def abrir_tabela_selecionada(combo, treeview):
         treeview["columns"] = ()
 
 def selecionar_arquivo():
-    global conn, tabela_combobox  # Adicionar a declaração global para acessar a variável conn e tabela_combobox
+    global conn, tabela_combobox, arquivo_atual  # Adicionar a declaração global para acessar a variável conn e tabela_combobox
     arquivo_sqlite = filedialog.askopenfilename(filetypes=[("SQLite files", "*.sqlite")])
     if arquivo_sqlite:
         conn = sqlite3.connect(arquivo_sqlite)
+        arquivo_atual = arquivo_sqlite
         carregar_tabelas(tabela_combobox)
 
 # Função principal
 def main():
-    global conn, tabela_combobox  # Adicionar a declaração global para acessar a variável conn e tabela_combobox
+    global conn, tabela_combobox, arquivo_atual  # Adicionar a declaração global para acessar a variável conn e tabela_combobox
     # Criar a janela principal
     root = tk.Tk()
     root.title("Leitor e Editor de Bancos de Dados SQLite")
@@ -139,6 +142,14 @@ def main():
     abrir_tabela_button = ttk.Button(root, text="Abrir Tabela", command=lambda: abrir_tabela_selecionada(tabela_combobox, treeview))
     abrir_tabela_button.grid(row=2, column=1, padx=10, pady=10)
 
+    # Botão para salvar alterações
+    salvar_button = ttk.Button(root, text="Salvar", command=salvar)
+    salvar_button.grid(row=6, column=0, padx=10, pady=10)
+
+    # Botão para salvar como
+    salvar_como_button = ttk.Button(root, text="Salvar Como", command=salvar_como)
+    salvar_como_button.grid(row=6, column=1, padx=10, pady=10)
+
     # Permitir redimensionamento
     root.columnconfigure(0, weight=1)
     root.rowconfigure(3, weight=1)
@@ -149,6 +160,52 @@ def main():
     # Fechar a conexão ao fechar a janela
     if conn:
         conn.close()
+
+def salvar():
+    global conn, arquivo_atual
+    if conn and arquivo_atual:
+        conn.commit()
+
+import shutil
+
+def salvar_como():
+    global conn, arquivo_atual
+
+    if conn and arquivo_atual:
+        extensoes = [("Arquivos CSV", "*.csv"), ("Arquivos Excel", "*.xlsx"), ("Bancos de Dados SQLite", "*.sqlite")]
+        opcao = filedialog.asksaveasfilename(defaultextension=".sqlite", filetypes=extensoes)
+        
+        if opcao:
+            conn.commit()
+            conn.close()
+
+            if opcao.endswith(".sqlite"):
+                # Copiar o arquivo SQLite
+                shutil.copyfile(arquivo_atual, opcao)
+                arquivo_atual = opcao
+                conn = sqlite3.connect(arquivo_atual)
+                carregar_tabelas(tabela_combobox)
+
+            elif opcao.endswith(".csv"):
+                # Exportar para CSV
+                conn = sqlite3.connect(arquivo_atual)  # Reabrir a conexão
+                df = pd.read_sql_query(f"SELECT * FROM {tabela_combobox.get()};", conn)
+                conn.close()
+                df.to_csv(opcao, index=False, encoding="utf-8")
+
+            elif opcao.endswith(".xlsx"):
+                # Exportar para Excel
+                conn = sqlite3.connect(arquivo_atual)  # Reabrir a conexão
+                df = pd.read_sql_query(f"SELECT * FROM {tabela_combobox.get()};", conn)
+                conn.close()
+                df.to_excel(opcao, index=False)  # Remover o argumento 'encoding'
+
+
+            # Reabrir a conexão
+            conn = sqlite3.connect(arquivo_atual)
+            carregar_tabelas(tabela_combobox)
+
+
 
 # Executar a função principal
 if __name__ == "__main__":
