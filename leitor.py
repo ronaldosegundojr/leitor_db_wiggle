@@ -2,11 +2,30 @@ import sqlite3
 import tkinter as tk
 from tkinter import ttk, filedialog, scrolledtext, messagebox, simpledialog
 import pandas as pd
-import shutil
 
 # Tornar a variável conn global
 conn = None
-arquivo_atual = None  # Adicionar variável para rastrear o arquivo atual
+modo_escuro = False  # Variável para controlar o modo escuro
+
+def toggle_modo_escuro():
+    global modo_escuro
+    modo_escuro = not modo_escuro
+    aplicar_estilo()
+
+def aplicar_estilo():
+    cor_fundo = "#191919" if modo_escuro else "white"
+    cor_texto = "white" if modo_escuro else "black"
+
+    root.configure(background=cor_fundo)
+    for widget in root.winfo_children():
+        try:
+            widget.configure(background=cor_fundo, foreground=cor_texto)
+        except tk.TclError:
+            pass
+
+    # Verificar se a treeview está definida antes de configurar a tag
+    if 'treeview' in globals():
+        treeview.tag_configure("striped", background="#2d2d2d" if modo_escuro else "white")
 
 def executar_query_sql(query, treeview):
     global conn  # Adicionar a declaração global para acessar a variável conn
@@ -85,16 +104,40 @@ def abrir_tabela_selecionada(combo, treeview):
         treeview["columns"] = ()
 
 def selecionar_arquivo():
-    global conn, tabela_combobox, arquivo_atual  # Adicionar a declaração global para acessar a variável conn e tabela_combobox
+    global conn, tabela_combobox  # Adicionar a declaração global para acessar a variável conn e tabela_combobox
     arquivo_sqlite = filedialog.askopenfilename(filetypes=[("SQLite files", "*.sqlite")])
     if arquivo_sqlite:
         conn = sqlite3.connect(arquivo_sqlite)
-        arquivo_atual = arquivo_sqlite
         carregar_tabelas(tabela_combobox)
+
+def salvar():
+    if conn:
+        conn.commit()
+        messagebox.showinfo("Salvar", "Alterações salvas no arquivo original.")
+
+def salvar_como():
+    global conn, tabela_combobox
+    if conn:
+        tabela = tabela_combobox.get()
+        df = pd.read_sql_query(f"SELECT * FROM {tabela};", conn)
+
+        file_path = filedialog.asksaveasfilename(defaultextension=".csv", filetypes=[("CSV files", "*.csv"), ("Excel files", "*.xlsx"), ("SQLite files", "*.sqlite")])
+        if file_path:
+            if file_path.endswith(".csv"):
+                df.to_csv(file_path, index=False, encoding="utf-8")
+            elif file_path.endswith(".xlsx"):
+                df.to_excel(file_path, index=False, encoding="utf-8")
+            elif file_path.endswith(".sqlite"):
+                conn.close()  # Fechar a conexão antes de copiar o arquivo
+                import shutil
+                shutil.copyfile(arquivo_sqlite, file_path)
+                conn = sqlite3.connect(arquivo_sqlite)  # Reabrir a conexão
+
+            messagebox.showinfo("Salvar Como", f"Alterações salvas em {file_path}.")
 
 # Função principal
 def main():
-    global conn, tabela_combobox, arquivo_atual  # Adicionar a declaração global para acessar a variável conn e tabela_combobox
+    global conn, tabela_combobox, root, treeview  # Adicionar a declaração global para acessar a variável conn, tabela_combobox, root e treeview
     # Criar a janela principal
     root = tk.Tk()
     root.title("Leitor e Editor de Bancos de Dados SQLite")
@@ -117,30 +160,34 @@ def main():
     label_selecione_arquivo = tk.Label(root, text="Selecione o Arquivo do Banco de Dados")
     label_selecione_arquivo.grid(row=0, column=0, padx=10, pady=5, columnspan=2)
 
+    # Adicionar um botão para alternar entre modo claro e escuro
+    toggle_modo_escuro_button = ttk.Button(root, text="Alternar Modo Escuro", command=toggle_modo_escuro)
+    toggle_modo_escuro_button.grid(row=0, column=2, padx=10, pady=5)
+
     # Treeview para exibir colunas e conteúdo da tabela
     treeview = ttk.Treeview(root)
-    treeview.grid(row=3, column=0, columnspan=2, padx=10, pady=10, sticky="nsew")
+    treeview.grid(row=3, column=0, columnspan=3, padx=10, pady=10, sticky="nsew")
 
     # Barras de rolagem horizontal e vertical para o Treeview
     scrollbar_y = ttk.Scrollbar(root, orient="vertical", command=treeview.yview)
-    scrollbar_y.grid(row=3, column=2, sticky="ns")
+    scrollbar_y.grid(row=3, column=3, sticky="ns")
 
     scrollbar_x = ttk.Scrollbar(root, orient="horizontal", command=treeview.xview)
-    scrollbar_x.grid(row=4, column=0, columnspan=2, sticky="ew")
+    scrollbar_x.grid(row=4, column=0, columnspan=3, sticky="ew")
 
     treeview.configure(yscrollcommand=scrollbar_y.set, xscrollcommand=scrollbar_x.set)
 
     # Widget de entrada para inserir consultas SQL
     sql_entry = tk.Entry(root, width=50)
-    sql_entry.grid(row=5, column=0, padx=10, pady=10)
+    sql_entry.grid(row=5, column=0, padx=10, pady=10, columnspan=2)
 
     # Botão para executar consulta SQL
     executar_sql_button = ttk.Button(root, text="Executar SQL", command=lambda: executar_query_sql(sql_entry.get(), treeview))
-    executar_sql_button.grid(row=5, column=1, padx=10, pady=10)
+    executar_sql_button.grid(row=5, column=2, padx=10, pady=10)
 
     # Botão para abrir tabela selecionada
     abrir_tabela_button = ttk.Button(root, text="Abrir Tabela", command=lambda: abrir_tabela_selecionada(tabela_combobox, treeview))
-    abrir_tabela_button.grid(row=2, column=1, padx=10, pady=10)
+    abrir_tabela_button.grid(row=2, column=2, padx=10, pady=10)
 
     # Botão para salvar alterações
     salvar_button = ttk.Button(root, text="Salvar", command=salvar)
@@ -154,58 +201,15 @@ def main():
     root.columnconfigure(0, weight=1)
     root.rowconfigure(3, weight=1)
 
+    # Aplicar estilo inicial
+    aplicar_estilo()
+
     # Iniciar o loop principal da interface gráfica
     root.mainloop()
 
     # Fechar a conexão ao fechar a janela
     if conn:
         conn.close()
-
-def salvar():
-    global conn, arquivo_atual
-    if conn and arquivo_atual:
-        conn.commit()
-
-import shutil
-
-def salvar_como():
-    global conn, arquivo_atual
-
-    if conn and arquivo_atual:
-        extensoes = [("Arquivos CSV", "*.csv"), ("Arquivos Excel", "*.xlsx"), ("Bancos de Dados SQLite", "*.sqlite")]
-        opcao = filedialog.asksaveasfilename(defaultextension=".sqlite", filetypes=extensoes)
-        
-        if opcao:
-            conn.commit()
-            conn.close()
-
-            if opcao.endswith(".sqlite"):
-                # Copiar o arquivo SQLite
-                shutil.copyfile(arquivo_atual, opcao)
-                arquivo_atual = opcao
-                conn = sqlite3.connect(arquivo_atual)
-                carregar_tabelas(tabela_combobox)
-
-            elif opcao.endswith(".csv"):
-                # Exportar para CSV
-                conn = sqlite3.connect(arquivo_atual)  # Reabrir a conexão
-                df = pd.read_sql_query(f"SELECT * FROM {tabela_combobox.get()};", conn)
-                conn.close()
-                df.to_csv(opcao, index=False, encoding="utf-8")
-
-            elif opcao.endswith(".xlsx"):
-                # Exportar para Excel
-                conn = sqlite3.connect(arquivo_atual)  # Reabrir a conexão
-                df = pd.read_sql_query(f"SELECT * FROM {tabela_combobox.get()};", conn)
-                conn.close()
-                df.to_excel(opcao, index=False)  # Remover o argumento 'encoding'
-
-
-            # Reabrir a conexão
-            conn = sqlite3.connect(arquivo_atual)
-            carregar_tabelas(tabela_combobox)
-
-
 
 # Executar a função principal
 if __name__ == "__main__":
